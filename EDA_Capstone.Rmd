@@ -1,0 +1,168 @@
+---
+title: "Initial Exploratory Analysis of the Swiftkey data"
+author: "RK"
+date: "March 20, 2016"
+output: html_document
+---
+
+## Summary
+Here , an initial exploratory analysis of the data provided by Swiftkey has been performed. In order to do this, we created a corpus from the three text files ( blogs , news and twitter ) in English . This initial analysis was performed on a machine with 8GB RAM and 2.7 GHz Intel Core i5 processor . The Operating System was Apple's OS X Yosemite . A subset of the corpus was used to perform this initial analysis. The R code files used for this analysis can be found at https://github.com/tankbell
+
+## Count of Lines , Words and Bytes
+```{r loadCounts, echo=FALSE, message=FALSE, warning=FALSE}
+d <- c("blogs","news","twitter")
+lineCount <- c("899288","1010242","2360148")
+wordCount <- c("37334690","34372720","30374206")
+byteCount <- c("210160014","205811889","167105338")
+countInfo <<- data.frame(Data=d,Lines=lineCount,Words=wordCount,Bytes=byteCount)
+```
+
+```{r displayCount}
+countInfo
+```
+
+```{r loadLibs, echo=FALSE, message=FALSE, warning=FALSE}
+library(tm)
+library(wordcloud)
+library(RWeka)
+library(slam)
+library(ggplot2)
+options(mc.cores=1)
+```
+
+```{r buildSmallCorpus, echo=FALSE, message=FALSE, warning=FALSE}
+buildSmallCorpus <- function(filename, n) {
+  f <- filename
+  conn <- file(f,open="r")
+  l <- readLines(conn)
+  textVector <- character(0)
+  for (i in 1:n) {
+    textVector <- c(textVector, l[i])
+  }
+  close(conn)
+  ## Make the swiftKey Small Corpus global
+  swiftKeySmallCorpus <- Corpus(VectorSource(textVector))
+  
+  return (swiftKeySmallCorpus)
+}
+```
+
+```{r createMainCorpusForAnalysis, echo=FALSE, message=FALSE, warning=FALSE}
+  blogsCorpus <- buildSmallCorpus("./final/en_US/en_US.blogs.txt",4000)
+  newsCorpus <- buildSmallCorpus("./final/en_US/en_US.news.txt",4000)
+  twitterCorpus <- buildSmallCorpus("./final/en_US/en_US.twitter.txt",4000)
+  
+  ## Create the main corpus
+  corpus <- c(blogsCorpus, newsCorpus, twitterCorpus)
+```
+
+## Corpus Transformations
+The following transformations were applied to the corpus :
+
+- The tokens were transformed to lower case.
+
+- Punctuations were removed.
+
+- Extra white spaces were stripped
+
+- Numbers were removed from the tokens.
+
+4000 documents from each of the three text files ( Blogs , News and Twitter ) were added to the corpus resulting in a total of 12000 documents that were analyzed in this initial phase.
+
+```{r applyTransformations, echo=FALSE, message=FALSE, warning=FALSE}
+## Apply transformations to the corpus
+  corpus <- tm_map(corpus, removeNumbers)
+  ## Make terms lower case
+  corpus <- tm_map(corpus, content_transformer(tolower))
+  ## Remove extra white space ( result would be
+  ## just a single white space )
+  corpus <- tm_map(corpus, stripWhitespace)
+  ## Remove punctuations
+  corpus <- tm_map(corpus, removePunctuation)
+```
+
+## Unigram analysis
+The objective here is to construct a 1-gram term document matrix using the corpus . Using the term document matrix , a 1-gram wordcloud is constructed . Words that occur atleast 1000 times are also presented in the list below . Before building the word cloud we also remove sparse terms from the corpus with a maximal allowed sparsity of 0.99 . For full details on the implementation please refer the github repository. Only the results are presented here.
+
+```{r created1gtdm, echo=FALSE,message=FALSE,warning=FALSE}
+termDocMatrix <- TermDocumentMatrix(corpus)
+```
+
+#### Words with frequency atleast equal to 1000
+```{r unigramFreq}
+findFreqTerms(termDocMatrix, 1000)
+```
+
+#### Histogram of Frequent words in the Corpus
+```{r preHistogram,echo=FALSE,message=FALSE,warning=FALSE}
+f <- sort(rowSums(as.matrix(termDocMatrix)), decreasing=TRUE)   
+df <- data.frame(token=names(f), frequency=f)
+p <<- ggplot(subset(df, frequency>1000), aes(token, frequency))    
+p <<- p + geom_bar(fill="red",stat="identity")   
+p <<- p + theme(axis.text.x=element_text(angle=45, hjust=1))
+```
+
+```{r histogram}
+p
+```
+
+#### Term-term adjacency matrix
+```{r preTtMatrix, echo=FALSE, message=FALSE, warning=FALSE}
+tdmTemp <- inspect(termDocMatrix[1001:1005,1001:1005])
+tdmTemp[tdmTemp>=1] <- 1
+termTermMatrix <<- tdmTemp %*% t(tdmTemp)
+termTermMatrix[1:5,1:5]
+```
+
+#### 1-gram wordcloud
+```{r prewc1,echo=FALSE,message=FALSE,warning=FALSE}
+  termDocMatrix <- removeSparseTerms(termDocMatrix, 0.99)
+  m <- rollup(termDocMatrix, 2, na.rm=TRUE, FUN = sum)
+  v = sort(rowSums(as.matrix(m)),decreasing=TRUE)
+  d = data.frame(word = names(v),freq=v)
+  
+  pal = brewer.pal(9,"Dark2")
+```
+
+```{r unigramWc}
+wordcloud(words = d$word,
+          freq = d$freq,
+          scale = c(8,.8),
+          min.freq = 2,
+          random.order = F,
+          colors = pal)
+```
+
+## Bigram analysis
+The objective here is to construct a 2-gram term document matrix and a 2-gram wordcloud after removing sparse terms with a maximal allowed sparsity of 0.99. The RWeka library was used to create a Bigram tokenizer.
+
+#### Bigram Wordcloud
+```{r created2gtdm, echo=FALSE,message=FALSE,warning=FALSE}
+BigramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min = 2, max = 2))
+termDocMatrix2g <- TermDocumentMatrix(corpus, control = list(tokenize = BigramTokenizer))
+```
+
+```{r prewc2,echo=FALSE,message=FALSE,warning=FALSE}
+  termDocMatrix2g <- removeSparseTerms(termDocMatrix2g, 0.99)
+  m <- rollup(termDocMatrix2g, 2, na.rm=TRUE, FUN = sum)
+  v = sort(rowSums(as.matrix(m)),decreasing=TRUE)
+  d = data.frame(word = names(v),freq=v)
+  
+  pal = brewer.pal(9,"Dark2")
+```
+
+```{r bigramWc, message=FALSE, warning=FALSE}
+wordcloud(words = d$word,
+          freq = d$freq,
+          scale = c(7,.7),
+          min.freq = 2,
+          random.order = F,
+          colors = pal)
+```
+
+## Future Work
+The proposal for the final solution is to perform the word prediction based on the Markov assumption . Markov models work on the basis that we can predict the value of a future unit by not looking too far back in the past . Thus we can say that the probability of the next word in a sentence depends on the previous word . 
+
+If for example Person A types two words in a sentence . In order to predict the third word we can look at all trigrams in our model and match the first two words of the trigrams to the two words that the Person A just typed . Assuming all the matched trigrams are sorted in the decreasing order of the probabilities of their occurrence in the corpus , we can then pick the trigram with the highest probability and recommend the third word in that to Person A . 
+
+We can come up with a word prediction algorithm by generalizing this to a n-gram probability matrix.
